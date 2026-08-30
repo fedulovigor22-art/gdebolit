@@ -1,29 +1,69 @@
-name: Build APK
+name: Build GdeBolit APK
+
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - master
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Find and unpack project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ZIP project not found in repository root."
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          if [ -f extracted/GdeBolit/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted/GdeBolit" >> "$GITHUB_ENV"
+          elif [ -f extracted/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted" >> "$GITHUB_ENV"
+          else
+            PROJECT_SETTINGS="$(find extracted -name settings.gradle.kts -type f | head -n 1)"
+
+            if [ -z "$PROJECT_SETTINGS" ]; then
+              echo "settings.gradle.kts not found after unpacking ZIP."
+              exit 1
+            fi
+
+            echo "PROJECT_DIR=$(dirname "$PROJECT_SETTINGS")" >> "$GITHUB_ENV"
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Set up Gradle 8.9
+          java-version: "17"
+
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: "8.9"
+
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GdeBolit-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: GdeBolit-APK
+          path: "**/build/outputs/apk/**/*.apk"
