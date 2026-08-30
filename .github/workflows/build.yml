@@ -13,77 +13,53 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+
+      - name: Find and unpack project ZIP
+        shell: bash
+        run: |
+          set -e
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ZIP project not found in repository root."
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          if [ -f extracted/GdeBolit/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted/GdeBolit" >> "$GITHUB_ENV"
+          elif [ -f extracted/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted" >> "$GITHUB_ENV"
+          else
+            PROJECT_SETTINGS="$(find extracted -name settings.gradle.kts -type f | head -n 1)"
+            if [ -z "$PROJECT_SETTINGS" ]; then
+              echo "settings.gradle.kts not found after unpacking ZIP."
+              exit 1
+            fi
+            echo "PROJECT_DIR=$(dirname "$PROJECT_SETTINGS")" >> "$GITHUB_ENV"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
 
-      - name: Unpack GdeBolit project
+      - name: Build debug APK
         shell: bash
         run: |
-          set -e
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found"
-            exit 1
-          fi
-
-          echo "Found ZIP: $ZIP_FILE"
-
-          mkdir -p project
-          unzip -q "$ZIP_FILE" -d project
-
-          echo "Project contents:"
-          find project -maxdepth 3 -type f | head -200
-
-      - name: Find Gradle project
-        shell: bash
-        run: |
-          set -e
-
-          GRADLEW=$(find project -type f -name "gradlew" | head -1)
-
-          if [ -z "$GRADLEW" ]; then
-            echo "ERROR: gradlew not found after ZIP extraction"
-            echo "All files:"
-            find project -type f | head -300
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$GRADLEW")
-
-          echo "Gradle wrapper: $GRADLEW"
-          echo "Project directory: $PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          chmod +x "$GRADLEW"
-
-      - name: Build Debug APK
-        shell: bash
-        run: |
-          set -e
           cd "$PROJECT_DIR"
-          ./gradlew assembleDebug --stacktrace
-
-      - name: Find APK
-        shell: bash
-        run: |
-          echo "APK files:"
-          find "$PROJECT_DIR" -type f -name "*.apk" -print
+          gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GdeBolit-APK
-          path: |
-            project/**/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+          path: "**/build/outputs/apk/**/*.apk"
