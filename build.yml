@@ -1,0 +1,105 @@
+name: Build GdeBolit APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Checking repository ==="
+
+          PROJECT_SETTINGS="$(find .             -path './.git' -prune -o             -path './extracted' -prune -o             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
+
+          if [ -n "$PROJECT_SETTINGS" ]; then
+            PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
+            echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+            echo "Android project found: $PROJECT_DIR"
+            exit 0
+          fi
+
+          echo "Project not found directly. Looking for ZIP..."
+
+          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Android project and ZIP were not found."
+            echo "Repository contents:"
+            find . -maxdepth 3 -type f | sort
+            exit 1
+          fi
+
+          echo "ZIP found: $ZIP_FILE"
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "=== ZIP contents ==="
+          find extracted -maxdepth 4 -type f | sort | head -n 200
+
+          PROJECT_SETTINGS="$(find extracted             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
+
+          if [ -z "$PROJECT_SETTINGS" ]; then
+            echo "ERROR: settings.gradle(.kts) not found in ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project found in ZIP: $PROJECT_DIR"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6"
+
+      - name: Show project structure
+        shell: bash
+        run: |
+          echo "PROJECT_DIR=$PROJECT_DIR"
+          cd "$PROJECT_DIR"
+          echo "=== Project files ==="
+          find . -maxdepth 3 -type f | sort
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --stacktrace
+
+      - name: Find APK
+        shell: bash
+        run: |
+          echo "=== APK files ==="
+          find "$PROJECT_DIR" -type f -name "*.apk" -print
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GdeBolit-APK
+          path: "**/build/outputs/apk/**/*.apk"
+          if-no-files-found: error
