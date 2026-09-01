@@ -15,88 +15,121 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find Android project
+      - name: Find or unpack Android project
         shell: bash
         run: |
           set -e
 
           echo "=== Checking repository ==="
 
-          PROJECT_SETTINGS="$(find .             -path './.git' -prune -o             -path './extracted' -prune -o             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
+          PROJECT_SETTINGS="$(find . \
+            -path './.git' -prune -o \
+            -path './extracted' -prune -o \
+            \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) \
+            -type f -print | head -n 1)"
 
           if [ -n "$PROJECT_SETTINGS" ]; then
             PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
-            echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
             echo "Android project found: $PROJECT_DIR"
-            exit 0
+          else
+            echo "Android project not found. Looking for ZIP..."
+
+            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
+
+            if [ -z "$ZIP_FILE" ]; then
+              echo "ERROR: Android project and ZIP were not found."
+              find . -maxdepth 3 -type f | sort
+              exit 1
+            fi
+
+            echo "ZIP found: $ZIP_FILE"
+
+            rm -rf extracted
+            mkdir -p extracted
+            unzip -q "$ZIP_FILE" -d extracted
+
+            PROJECT_SETTINGS="$(find extracted \
+              \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) \
+              -type f -print | head -n 1)"
+
+            if [ -z "$PROJECT_SETTINGS" ]; then
+              echo "ERROR: settings.gradle(.kts) not found in ZIP."
+              find extracted -maxdepth 4 -type f | sort
+              exit 1
+            fi
+
+            PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
+            echo "Android project found in ZIP: $PROJECT_DIR"
           fi
 
-          echo "Project not found directly. Looking for ZIP..."
-
-          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Android project and ZIP were not found."
-            find . -maxdepth 3 -type f | sort
-            exit 1
-          fi
-
-          echo "ZIP found: $ZIP_FILE"
-
-          rm -rf extracted
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
-
-          echo "=== ZIP contents ==="
-          find extracted -maxdepth 4 -type f | sort | head -n 200
-
-          PROJECT_SETTINGS="$(find extracted             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
-
-          if [ -z "$PROJECT_SETTINGS" ]; then
-            echo "ERROR: settings.gradle(.kts) not found in ZIP."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found in ZIP: $PROJECT_DIR"
+
+          echo "=== Project structure ==="
+          find "$PROJECT_DIR" -maxdepth 4 -type f | sort
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Gradle 9.1.0
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.1.0"
+          gradle-version: '8.9'
 
-      - name: Verify build environment
-        shell: bash
-        run: |
-          set -e
-          echo "=== Java ==="
-          java -version
-          echo "=== Gradle ==="
-          gradle --version
-          echo "=== Project ==="
-          echo "PROJECT_DIR=$PROJECT_DIR"
-
-      - name: Show project structure
+      - name: Fix Java/Kotlin JVM target
         shell: bash
         run: |
           set -e
           cd "$PROJECT_DIR"
-          echo "=== Project files ==="
-          find . -maxdepth 3 -type f | sort
+
+          APP_GRADLE="app/build.gradle"
+
+          if [ ! -f "$APP_GRADLE" ]; then
+            echo "ERROR: $APP_GRADLE not found."
+            exit 1
+          fi
+
+          echo "=== Original app/build.gradle ==="
+          cat "$APP_GRADLE"
+
+          if ! grep -q "compileOptions" "$APP_GRADLE"; then
+            python3 - <<'PY'
+from pathlib import Path
+
+p = Path("app/build.gradle")
+s = p.read_text()
+
+needle = "android {"
+insert = """android {
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }"""
+
+if needle not in s:
+    raise SystemExit("android { block not found")
+
+s = s.replace(needle, insert, 1)
+p.write_text(s)
+PY
+          fi
+
+          echo "=== Fixed app/build.gradle ==="
+          cat "$APP_GRADLE"
 
       - name: Build debug APK
         shell: bash
         run: |
           set -e
           cd "$PROJECT_DIR"
-          gradle assembleDebug --stacktrace
+
+          echo "=== Gradle version ==="
+          gradle --version
+
+          echo "=== Building APK ==="
+          gradle assembleDebug --stacktrace --no-daemon
 
       - name: Find APK
         shell: bash
