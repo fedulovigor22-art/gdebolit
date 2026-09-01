@@ -1,17 +1,21 @@
 name: Build GdeBolit APK
 
-on:
-  workflow_dispatch:
+'on':
+  workflow_dispatch: {}
   push:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -30,49 +34,82 @@ jobs:
         run: |
           set -e
 
-          echo "Files in repository:"
-          find . -maxdepth 3 -type f | sort
+          echo "=== REPOSITORY ==="
+          find . -maxdepth 4 -type f | sort
 
           PROJECT_DIR=""
 
-          SETTINGS=$(find . -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
+          SETTINGS=$(find . \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -not -path "./.git/*" \
+            | head -n 1)
 
           if [ -n "$SETTINGS" ]; then
-            PROJECT_DIR=$(dirname "$SETTINGS")
-            echo "Project found: $PROJECT_DIR"
+            PROJECT_DIR="$(dirname "$SETTINGS")"
+            echo "Android project found:"
+            echo "$PROJECT_DIR"
           else
-            ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+            ZIP=$(find . \
+              -maxdepth 3 \
+              -type f \
+              -iname "*.zip" \
+              -not -path "./.git/*" \
+              | head -n 1)
 
             if [ -z "$ZIP" ]; then
-              echo "ERROR: ZIP with Android project not found"
+              echo "ERROR: Android project and ZIP were not found."
               exit 1
             fi
 
-            echo "ZIP found: $ZIP"
+            echo "ZIP found:"
+            echo "$ZIP"
 
             rm -rf extracted
-            mkdir extracted
+            mkdir -p extracted
 
             unzip -q "$ZIP" -d extracted
 
-            SETTINGS=$(find extracted -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
+            SETTINGS=$(find extracted \
+              -type f \
+              \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+              | head -n 1)
 
             if [ -z "$SETTINGS" ]; then
-              echo "ERROR: settings.gradle not found inside ZIP"
-              find extracted -maxdepth 5 -type f | sort
+              echo "ERROR: settings.gradle was not found inside ZIP."
+              find extracted -maxdepth 6 -type f | sort
               exit 1
             fi
 
-            PROJECT_DIR=$(dirname "$SETTINGS")
-            echo "Project extracted to: $PROJECT_DIR"
+            PROJECT_DIR="$(dirname "$SETTINGS")"
+
+            echo "Extracted Android project:"
+            echo "$PROJECT_DIR"
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Fix Java 17
+      - name: Show Gradle project
         shell: bash
         run: |
           set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "=== PROJECT DIRECTORY ==="
+          pwd
+
+          echo "=== PROJECT FILES ==="
+          find . -maxdepth 3 -type f | sort
+
+          echo "=== GRADLE ==="
+          gradle --version
+
+      - name: Prepare Java 17
+        shell: bash
+        run: |
+          set -e
+
           cd "$PROJECT_DIR"
 
           if [ -f app/build.gradle ]; then
@@ -92,24 +129,48 @@ if "compileOptions" not in s:
     }""",
         1
     )
+    p.write_text(s)
 
-p.write_text(s)
+elif "sourceCompatibility JavaVersion.VERSION_17" not in s:
+    print("compileOptions already exists; leaving it unchanged.")
+
+print("app/build.gradle:")
+print(p.read_text())
 PY
           fi
 
-          cat app/build.gradle
-
-      - name: Build APK
+      - name: Build Debug APK
         shell: bash
         run: |
           set -e
+
           cd "$PROJECT_DIR"
 
-          gradle assembleDebug --stacktrace --no-daemon
+          echo "=== BUILD START ==="
+
+          gradle assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+          echo "=== BUILD FINISHED ==="
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== APK FILES ==="
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/*" \
+            -name "*.apk" \
+            -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GdeBolit-APK
-          path: '**/build/outputs/apk/**/*.apk'
+          path: |
+            **/build/outputs/apk/**/*.apk
           if-no-files-found: error
