@@ -22,7 +22,11 @@ jobs:
 
           echo "=== Checking repository ==="
 
-          PROJECT_SETTINGS="$(find .             -path './.git' -prune -o             -path './extracted' -prune -o             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
+          PROJECT_SETTINGS="$(find . \
+            -path './.git' -prune -o \
+            -path './extracted' -prune -o \
+            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+            -type f -print | head -n 1)"
 
           if [ -n "$PROJECT_SETTINGS" ]; then
             PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
@@ -37,7 +41,6 @@ jobs:
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: Android project and ZIP were not found."
-            echo "Repository contents:"
             find . -maxdepth 3 -type f | sort
             exit 1
           fi
@@ -46,13 +49,14 @@ jobs:
 
           rm -rf extracted
           mkdir -p extracted
-
           unzip -q "$ZIP_FILE" -d extracted
 
           echo "=== ZIP contents ==="
           find extracted -maxdepth 4 -type f | sort | head -n 200
 
-          PROJECT_SETTINGS="$(find extracted             \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \)             -type f -print | head -n 1)"
+          PROJECT_SETTINGS="$(find extracted \
+            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+            -type f -print | head -n 1)"
 
           if [ -z "$PROJECT_SETTINGS" ]; then
             echo "ERROR: settings.gradle(.kts) not found in ZIP."
@@ -71,16 +75,31 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 9.1.0
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.6"
+          gradle-version: "9.1.0"
+
+      - name: Verify build environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Java ==="
+          java -version
+
+          echo "=== Gradle ==="
+          gradle --version
+
+          echo "=== Project ==="
+          echo "PROJECT_DIR=$PROJECT_DIR"
 
       - name: Show project structure
         shell: bash
         run: |
-          echo "PROJECT_DIR=$PROJECT_DIR"
+          set -e
           cd "$PROJECT_DIR"
+
           echo "=== Project files ==="
           find . -maxdepth 3 -type f | sort
 
@@ -89,11 +108,14 @@ jobs:
         run: |
           set -e
           cd "$PROJECT_DIR"
+
           gradle assembleDebug --stacktrace
 
       - name: Find APK
         shell: bash
         run: |
+          set -e
+
           echo "=== APK files ==="
           find "$PROJECT_DIR" -type f -name "*.apk" -print
 
