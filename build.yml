@@ -1,4 +1,4 @@
-name: Build GdeBolit APK
+name: Build GdeBolit APK v2
 
 on:
   workflow_dispatch:
