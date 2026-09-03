@@ -8,11 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build APK
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
 
     steps:
       - name: Checkout
@@ -34,16 +30,20 @@ jobs:
         run: |
           set -e
 
-          ZIP_FILE="$(find . -maxdepth 2 -type f -name 'GdeBolit_GitHub_READY(3).zip' | head -n 1)"
+          echo "Searching for GdeBolit ZIP..."
+
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname 'GdeBolit*.zip' | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: GdeBolit_GitHub_READY(3).zip not found"
+            echo "ERROR: GdeBolit ZIP not found"
             echo "Available ZIP files:"
-            find . -maxdepth 3 -type f -name '*.zip' -print
+            find . -type f -name '*.zip' -print
             exit 1
           fi
 
-          echo "ZIP found: $ZIP_FILE"
+          echo "Found ZIP:"
+          echo "$ZIP_FILE"
+
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       - name: Unpack Android project
@@ -51,79 +51,66 @@ jobs:
         run: |
           set -e
 
-          rm -rf android-project
-          mkdir -p android-project
+          rm -rf android_project
+          mkdir -p android_project
 
-          unzip -q "$ZIP_FILE" -d android-project
+          echo "Unpacking:"
+          echo "$ZIP_FILE"
 
-          echo "=== PROJECT CONTENT ==="
-          find android-project -maxdepth 3 -type f -print
+          unzip -q "$ZIP_FILE" -d android_project
 
-          if [ ! -f android-project/settings.gradle ]; then
-            echo "ERROR: settings.gradle not found"
-            exit 1
-          fi
+          echo "Contents:"
+          find android_project -maxdepth 3 -type f | head -100
 
-          if [ ! -f android-project/build.gradle ]; then
-            echo "ERROR: build.gradle not found"
-            exit 1
-          fi
-
-          if [ ! -f android-project/app/build.gradle ]; then
-            echo "ERROR: app/build.gradle not found"
-            exit 1
-          fi
-
-          echo "Android project found successfully."
-
-      - name: Build Debug APK
+      - name: Find Android project
         shell: bash
-        working-directory: android-project
         run: |
           set -e
 
-          echo "=== BUILD DIRECTORY ==="
-          pwd
+          PROJECT_DIR=$(find android_project -type f -name 'gradlew' -exec dirname {} \; | head -n 1)
 
-          echo "=== BUILD FILES ==="
-          ls -la
-          ls -la app
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: gradlew not found"
+            find android_project -maxdepth 4 -type f -print
+            exit 1
+          fi
 
-          echo "=== BUILD START ==="
+          echo "Android project:"
+          echo "$PROJECT_DIR"
 
-          gradle :app:assembleDebug \
-            --stacktrace \
-            --no-daemon
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "=== BUILD FINISHED ==="
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          chmod +x gradlew
+
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Find APK
         shell: bash
         run: |
           set -e
 
-          echo "=== APK FILES ==="
+          APK_FILE=$(find "$PROJECT_DIR" -type f -name '*.apk' | head -n 1)
 
-          find android-project \
-            -type f \
-            -path '*/build/outputs/apk/*.apk' \
-            -print
-
-          APK_COUNT="$(find android-project \
-            -type f \
-            -path '*/build/outputs/apk/*.apk' \
-            | wc -l)"
-
-          if [ "$APK_COUNT" -eq 0 ]; then
-            echo "ERROR: APK was not created"
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK not found"
             exit 1
           fi
 
-          echo "APK_COUNT=$APK_COUNT"
+          echo "APK found:"
+          echo "$APK_FILE"
+
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GdeBolit-APK
-          path: 'android-project/**/build/outputs/apk/**/*.apk'
+          name: GdeBolit-debug
+          path: ${{ env.APK_FILE }}
           if-no-files-found: error
