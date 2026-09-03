@@ -59,47 +59,49 @@ jobs:
 
           unzip -q "$ZIP_FILE" -d android_project
 
-          echo "Contents:"
-          find android_project -maxdepth 3 -type f | head -100
+          echo "Project files:"
+          find android_project -maxdepth 4 -type f -print
 
-      - name: Find Android project
+      - name: Check Android project
         shell: bash
         run: |
           set -e
 
-          PROJECT_DIR=$(find android_project -type f -name 'gradlew' -exec dirname {} \; | head -n 1)
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: gradlew not found"
-            find android_project -maxdepth 4 -type f -print
+          if [ ! -f "android_project/settings.gradle.kts" ] && \
+             [ ! -f "android_project/settings.gradle" ]; then
+            echo "ERROR: settings.gradle or settings.gradle.kts not found"
             exit 1
           fi
 
-          echo "Android project:"
-          echo "$PROJECT_DIR"
+          if [ ! -f "android_project/build.gradle.kts" ] && \
+             [ ! -f "android_project/build.gradle" ]; then
+            echo "ERROR: build.gradle or build.gradle.kts not found"
+            exit 1
+          fi
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project detected successfully."
 
       - name: Build Debug APK
         shell: bash
         run: |
           set -e
 
-          cd "$PROJECT_DIR"
+          cd android_project
 
-          chmod +x gradlew
+          echo "Starting Gradle build..."
 
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Find APK
         shell: bash
         run: |
           set -e
 
-          APK_FILE=$(find "$PROJECT_DIR" -type f -name '*.apk' | head -n 1)
+          APK_FILE=$(find android_project -type f -name '*.apk' | head -n 1)
 
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: APK not found"
+            find android_project -type f -print
             exit 1
           fi
 
